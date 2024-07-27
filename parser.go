@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dotabuff/manta/dota"
+	"github.com/baldurstod/manta/dota"
 	"github.com/golang/snappy"
 )
 
