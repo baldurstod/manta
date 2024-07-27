@@ -11,13 +11,13 @@ const buffer = 1024 * 100
 // stream wraps an io.Reader to provide functions necessary for reading the
 // outer replay structure.
 type stream struct {
-	io.Reader
+	io.ReadSeeker
 	buf  []byte
 	size uint32
 }
 
 // newStream creates a new stream from a given io.Reader
-func newStream(r io.Reader) *stream {
+func newStream(r io.ReadSeeker) *stream {
 	return &stream{r, make([]byte, buffer), buffer}
 }
 
@@ -28,11 +28,17 @@ func (s *stream) readBytes(n uint32) ([]byte, error) {
 		s.size = n
 	}
 
-	if _, err := io.ReadFull(s.Reader, s.buf[:n]); err != nil {
+	if _, err := io.ReadFull(s.ReadSeeker, s.buf[:n]); err != nil {
 		return nil, err
 	}
 
 	return s.buf[:n], nil
+}
+
+// skipBytes skip the given number of bytes from the reader
+func (s *stream) skipBytes(n uint32) error {
+	_, err := s.ReadSeeker.Seek(int64(n), io.SeekCurrent)
+	return err
 }
 
 // readByte reads a single byte from the reader

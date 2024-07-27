@@ -17,7 +17,7 @@ func mustGetReplayData(name string, url string) []byte {
 	return buf
 }
 
-func mustGetReplayReader(name string, url string) io.ReadCloser {
+func mustGetReplayReader(name string, url string) io.ReadSeekCloser {
 	for {
 		path := fmt.Sprintf("replays/%s.dem", name)
 		r, err := os.Open(path)

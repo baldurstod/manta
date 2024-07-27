@@ -11,7 +11,7 @@ import (
 )
 
 type timeoutReader struct {
-	r         io.Reader
+	r         io.ReadSeeker
 	maxBytes  int
 	readBytes int
 }
@@ -29,6 +29,10 @@ func (r *timeoutReader) Read(p []byte) (int, error) {
 		return n, timeoutError{}
 	}
 	return n, err
+}
+
+func (r *timeoutReader) Seek(offset int64, whence int) (int64, error) {
+	return r.r.Seek(offset, whence)
 }
 
 type timeoutError struct{}

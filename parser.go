@@ -47,6 +47,11 @@ type Parser struct {
 	stream            *stream
 	stringTables      *stringTables
 	stopAtTick        uint32
+
+	// ticks is the offset of the first message of this tick
+	ticks            map[uint32]int64
+	lastTick         uint32
+	ticksInitialized bool
 }
 
 // Create a new parser from a byte slice.
@@ -56,7 +61,7 @@ func NewParser(buf []byte) (*Parser, error) {
 }
 
 // Create a new Parser from an io.Reader
-func NewStreamParser(r io.Reader) (*Parser, error) {
+func NewStreamParser(r io.ReadSeeker) (*Parser, error) {
 	// Create a new parser with an internal reader for the given buffer.
 	parser := &Parser{
 		Callbacks: newCallbacks(),
@@ -76,6 +81,7 @@ func NewStreamParser(r io.Reader) (*Parser, error) {
 		serializers:       make(map[string]*serializer),
 		stream:            newStream(r),
 		stringTables:      newStringTables(),
+		ticks:             make(map[uint32]int64, 0),
 	}
 
 	// Parse out the header, ensuring that it's valid.
@@ -245,4 +251,89 @@ func (p *Parser) readOuterMessage() (*outerMessage, error) {
 // parseToTick configures this Parser to stop once it has parsed the given tick.
 func (p *Parser) parseToTick(n uint32) {
 	p.stopAtTick = n
+}
+
+func (p *Parser) GetLastTick() (uint32, error) {
+	if !p.ticksInitialized {
+		if err := p.prepareTicks(); err != nil {
+			return 0, err
+		}
+		p.ticksInitialized = true
+	}
+
+	return p.lastTick, nil
+}
+
+func (p *Parser) prepareTicks() (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			if e, ok := p.(error); ok {
+				err = e
+			} else {
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
+	// Loop through all outer messages until we're signaled to stop. Stopping
+	// happens when either the OnCDemoStop message is encountered or
+	// parser.Stop() is called programatically.
+	var t, lastTick uint32
+	var offset int64
+	for {
+		offset, _ = p.stream.ReadSeeker.Seek(0, io.SeekCurrent)
+		t, err = p.skipMessage()
+		if t > lastTick {
+			lastTick = t
+		}
+
+		if _, exist := p.ticks[t]; !exist {
+			p.ticks[t] = offset
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			p.lastTick = lastTick
+			return
+		}
+	}
+}
+
+func (p *Parser) skipMessage() (uint32, error) {
+	// Read a command header, which includes both the message type
+	// well as a flag to determine whether or not whether or not the
+	// message is compressed with snappy.
+	_, err := p.stream.readCommand()
+	if err != nil {
+		return 0, err
+	}
+
+	// Extract the type and compressed flag out of the command
+	//msgType := int32(command & ^dota.EDemoCommands_DEM_IsCompressed)
+	//msgCompressed := (command & dota.EDemoCommands_DEM_IsCompressed) == dota.EDemoCommands_DEM_IsCompressed
+
+	// Read the tick that the message corresponds with.
+	tick, err := p.stream.readVarUint32()
+	if err != nil {
+		return 0, err
+	}
+
+	// This appears to actually be an int32, where a -1 means pre-game.
+	if tick == 4294967295 {
+		tick = 0
+	}
+
+	// Read the size and following buffer.
+	size, err := p.stream.readVarUint32()
+	if err != nil {
+		return 0, err
+	}
+
+	if err = p.stream.skipBytes(size); err != nil {
+		return 0, err
+	}
+
+	return tick, nil
 }
